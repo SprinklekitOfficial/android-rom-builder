@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
 
-echo "=== Очистка дискового пространства ==="
-sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/libexec/docker
-docker rmi $(docker images -q) 2>/dev/null
-
 echo "=== Настройка Git и рабочих директорий ==="
 git config --global user.name "Actions Builder"
 git config --global user.email "builder@actions.com"
 
 mkdir -p ~/bin
 mkdir -p ~/android
-# Исправленная прямая ссылка на raw-скрипт repo от Google
-curl https://githubusercontent.com > ~/bin/repo
+
+# Using the official, permanent Google Android source repository link
+curl https://googleapis.com > ~/bin/repo
 chmod a+x ~/bin/repo
 export PATH=~/bin:$PATH
 
