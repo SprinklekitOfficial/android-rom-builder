@@ -1,51 +1,40 @@
-#!/bin/bash
-# build.sh -- Build AOSP/LineageOS ROM from source
-# Usage: ./build.sh <target> <variant>
-#        ./build.sh lineage_davinci userdebug
-#        ./build.sh aosp_redfin user
+#!/usr/bin/env bash
 
-set -e
-BOLD='\033[1m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
+# 1. Очистка диска виртуальной машины, чтобы освободить 100+ ГБ пространства
+echo "=== Очистка дискового пространства ==="
+sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/libexec/docker
+docker rmi $(docker images -q) 2>/dev/null
 
-TARGET="${1:?Usage: $0 <target> [variant]}"
-VARIANT="${2:-userdebug}"
-JOBS=$(nproc)
-OUT_DIR="out/target/product/${TARGET#*_}"
+# 2. Настройка Git и рабочих директорий
+git config --global user.name "Actions Builder"
+git config --global user.email "builder@actions.com"
+mkdir -p ~/bin ~/android
+curl https://googleapis.com > ~/bin/repo
+chmod a+x ~/bin/repo
+export PATH=~/bin:$PATH
 
-echo -e "\n${BOLD}🔨 ROM Builder${NC}"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Target:   $TARGET"
-echo "Variant:  $VARIANT"
-echo "Jobs:     $JOBS"
-echo "Out:      $OUT_DIR"
+# 3. Инициализация и скачивание исходников (Используем стабильный LineageOS 20)
+cd ~/android
+echo "=== Инициализация репозитория LineageOS ==="
+repo init -u https://github.com/LineageOS/android.git -b lineage-20.0 --depth=1
 
-if [[ ! -f "build/make/core/main.mk" ]]; then
-    echo -e "\n${RED}❌ Not in AOSP source directory${NC}"
-    exit 1
-fi
+# 4. Скачивание дерева устройства Xiaomi Mi 9T (davinci)
+echo "=== Добавление файлов устройства ==="
+mkdir -p .repo/local_manifests
+cat <<EOF > .repo/local_manifests/davinci.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <project path="device/xiaomi/davinci" name="LineageOS/android_device_xiaomi_davinci" remote="github" revision="lineage-20.0" />
+  <project path="kernel/xiaomi/sm6150" name="LineageOS/android_kernel_xiaomi_sm6150" remote="github" revision="lineage-20.0" />
+</manifest>
+EOF
 
-# Setup environment
-echo -e "\n${BOLD}⚙️  Setting up environment...${NC}"
+# 5. Синхронизация кода (Займет около 30-40 минут)
+echo "=== Запуск синхронизации исходного кода ==="
+repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags
+
+# 6. Запуск компиляции прошивки
+echo "=== Начало компиляции операционной системы ==="
 source build/envsetup.sh
-lunch "${TARGET}-${VARIANT}" > /dev/null
-
-# Wipe previous build
-[[ "$3" == "--clean" ]] && { echo "Wiping out/..."; rm -rf out; }
-
-# Build
-echo -e "\n${BOLD}🏗️  Building ROM...${NC} (this may take 30 min to 2 hours)"
-time mka bacon -j $JOBS 2>&1 | tee build.log
-
-# Check result
-ROM="${OUT_DIR}/$(grep 'TARGET_PRODUCT=' build.log | tail -1 | cut -d= -f2).zip" 2>/dev/null
-if [[ -f "out/target/product/${TARGET#*_}/"*".zip" ]]; then
-    ROM=$(ls -t out/target/product/${TARGET#*_}/*.zip 2>/dev/null | head -1)
-    SIZE=$(du -h "$ROM" | cut -f1)
-    echo -e "\n${GREEN}✅ Build successful!${NC}"
-    echo -e "ROM: $(basename $ROM) ($SIZE)"
-    echo -e "Path: $(realpath $ROM)"
-else
-    echo -e "\n${RED}❌ Build failed. Check build.log${NC}"
-    tail -50 build.log
-    exit 1
-fi
+breakfast davinci
+brunch davinci
